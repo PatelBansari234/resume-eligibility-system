@@ -13,3 +13,11 @@ frontend/.next/
 # OS
 .DS_Store
 Thumbs.db
+node_modules/
+.next/
+.env
+
+# Ignore backend secrets
+backend/.env
+backend/__pycache__/
+backend/temp.pdf

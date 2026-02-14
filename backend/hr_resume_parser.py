@@ -1,5 +1,5 @@
 # ==========================================
-# HR RESUME PARSER - FINAL STABLE VERSION
+# HR RESUME PARSER - FINAL CLEAN VERSION
 # ==========================================
 
 import os
@@ -19,6 +19,7 @@ from nltk.stem import PorterStemmer, WordNetLemmatizer
 
 from supabase import create_client
 
+
 # ==============================
 # LOAD ENV
 # ==============================
@@ -33,24 +34,17 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+
 # ==============================
 # SAFE NLTK DOWNLOAD
 # ==============================
 
-try:
-    nltk.data.find("tokenizers/punkt")
-except:
-    nltk.download("punkt")
+for pkg in ["punkt", "stopwords", "wordnet"]:
+    try:
+        nltk.data.find(f"corpora/{pkg}")
+    except:
+        nltk.download(pkg)
 
-try:
-    nltk.data.find("corpora/stopwords")
-except:
-    nltk.download("stopwords")
-
-try:
-    nltk.data.find("corpora/wordnet")
-except:
-    nltk.download("wordnet")
 
 # ==============================
 # FASTAPI
@@ -66,6 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ==============================
 # NLP OBJECTS
 # ==============================
@@ -80,35 +75,9 @@ SKILLS_DB = [
     "fastapi", "django"
 ]
 
-# ==============================
-# LEVENSHTEIN DISTANCE
-# ==============================
-
-def levenshtein_distance(a, b):
-    dp = [[0]*(len(b)+1) for _ in range(len(a)+1)]
-
-    for i in range(len(a)+1):
-        dp[i][0] = i
-    for j in range(len(b)+1):
-        dp[0][j] = j
-
-    for i in range(1, len(a)+1):
-        for j in range(1, len(b)+1):
-            cost = 0 if a[i-1] == b[j-1] else 1
-            dp[i][j] = min(
-                dp[i-1][j] + 1,
-                dp[i][j-1] + 1,
-                dp[i-1][j-1] + cost
-            )
-    return dp[-1][-1]
-
-
-def correct_spelling(word):
-    distances = [(skill, levenshtein_distance(word, skill)) for skill in SKILLS_DB]
-    return min(distances, key=lambda x: x[1])[0]
 
 # ==============================
-# TEXT PREPROCESSING
+# TEXT PROCESSING
 # ==============================
 
 def preprocess_text(text):
@@ -123,9 +92,20 @@ def preprocess_text(text):
 
     return lemmatized
 
-# ==============================
-# PDF READER
-# ==============================
+
+def extract_skills(tokens):
+    return list(set(tokens) & set(SKILLS_DB))
+
+
+def calculate_match(resume_skills, jd_skills):
+    if not jd_skills:
+        return 0, []
+
+    matched = set(resume_skills) & set(jd_skills)
+    score = (len(matched) / len(jd_skills)) * 100
+
+    return round(score, 2), list(matched)
+
 
 def read_pdf_from_bytes(pdf_bytes):
     text = ""
@@ -134,42 +114,15 @@ def read_pdf_from_bytes(pdf_bytes):
             text += page.extract_text() or ""
     return text
 
-# ==============================
-# SKILL EXTRACTION
-# ==============================
-
-def extract_skills(tokens):
-    found = set()
-
-    for word in tokens:
-        corrected = correct_spelling(word)
-        if corrected in SKILLS_DB:
-            found.add(corrected)
-
-    return list(found)
 
 # ==============================
-# MATCH CALCULATION (NO COSINE)
-# ==============================
-
-def calculate_match(resume_skills, jd_skills):
-
-    if len(jd_skills) == 0:
-        return 0
-
-    matched = set(resume_skills) & set(jd_skills)
-
-    score = (len(matched) / len(jd_skills)) * 100
-
-    return round(score, 2), list(matched)
-
-# ==============================
-# ROOT ROUTE (Fix 404 issue)
+# ROOT
 # ==============================
 
 @app.get("/")
 def root():
     return {"message": "HR Resume Parser API Running"}
+
 
 # ==============================
 # ANALYZE ROUTE
@@ -190,36 +143,83 @@ async def analyze(
     for resume in resumes:
 
         pdf_bytes = await resume.read()
-        raw_resume = read_pdf_from_bytes(pdf_bytes)
 
+        raw_resume = read_pdf_from_bytes(pdf_bytes)
         resume_tokens = preprocess_text(raw_resume)
         resume_skills = extract_skills(resume_tokens)
 
         match_score, matched_skills = calculate_match(resume_skills, jd_skills)
 
         status = "ELIGIBLE" if match_score >= 50 else "NOT ELIGIBLE"
+        file_url = None
 
-        # Store only eligible
+        # ==============================
+        # STORE ONLY ELIGIBLE
+        # ==============================
         if status == "ELIGIBLE":
 
-            supabase.table("eligible_resumes").insert({
-                "hr_email": hr_email,
-                "resume_name": resume.filename,
-                "match_score": match_score,
-                "file_url": "stored_locally"  # You can upgrade later to storage bucket
-            }).execute()
+            file_path = f"{hr_email}/{resume.filename}"
+
+            # Remove old file if exists
+            try:
+                supabase.storage.from_("resumes").remove([file_path])
+            except:
+                pass
+
+            # Upload to Supabase bucket
+            supabase.storage.from_("resumes").upload(
+                path=file_path,
+                file=pdf_bytes,
+                file_options={
+                    "content-type": "application/pdf",
+                    "upsert": "true"
+                }
+            )
+
+            # Get public URL
+            file_url = supabase.storage.from_("resumes").get_public_url(file_path)
+
+            # Check if already exists
+            existing = supabase.table("eligible_resumes") \
+                .select("id") \
+                .eq("hr_email", hr_email) \
+                .eq("resume_name", resume.filename) \
+                .execute()
+
+            if existing.data:
+                # UPDATE
+                supabase.table("eligible_resumes") \
+                    .update({
+                        "match_score": match_score,
+                        "file_url": file_url
+                    }) \
+                    .eq("hr_email", hr_email) \
+                    .eq("resume_name", resume.filename) \
+                    .execute()
+            else:
+                # INSERT
+                supabase.table("eligible_resumes") \
+                    .insert({
+                        "hr_email": hr_email,
+                        "resume_name": resume.filename,
+                        "match_score": match_score,
+                        "file_url": file_url
+                    }) \
+                    .execute()
 
         results.append({
             "resume_name": resume.filename,
             "match_score": match_score,
             "matched_skills": matched_skills,
-            "status": status
+            "status": status,
+            "file_url": file_url
         })
 
     return {"results": results}
 
+
 # ==============================
-# FETCH PREVIOUS ELIGIBLE
+# FETCH ELIGIBLE
 # ==============================
 
 @app.get("/eligible/{hr_email}")
@@ -228,6 +228,7 @@ def get_eligible(hr_email: str):
     response = supabase.table("eligible_resumes") \
         .select("*") \
         .eq("hr_email", hr_email) \
+        .order("created_at", desc=True) \
         .execute()
 
     return {"eligible_resumes": response.data}
