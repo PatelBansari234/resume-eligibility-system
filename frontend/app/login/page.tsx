@@ -1,26 +1,45 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/app/lib/supabaseClient";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { motion } from "framer-motion";
 
+/* ================= TYPES ================= */
+
+interface InputFieldProps
+  extends React.InputHTMLAttributes<HTMLInputElement> {
+  icon: React.ReactNode;
+}
+
+interface PasswordFieldProps {
+  value: string;
+  setValue: React.Dispatch<React.SetStateAction<string>>;
+  show: boolean;
+  setShow: React.Dispatch<React.SetStateAction<boolean>>;
+  placeholder?: string;
+}
+
+/* ================= MAIN COMPONENT ================= */
+
 export default function LoginPage() {
   const router = useRouter();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [isSignup, setIsSignup] = useState(false);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
+  const [isSignup, setIsSignup] = useState<boolean>(false);
+  const [email, setEmail] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [confirmPassword, setConfirmPassword] = useState<string>("");
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] =
+    useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [cooldown, setCooldown] = useState<number>(0);
 
-  // ================= Neural Background =================
+  /* ================= BACKGROUND ================= */
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -30,7 +49,15 @@ export default function LoginPage() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    const nodes: any[] = [];
+    type Node = {
+      x: number;
+      y: number;
+      dx: number;
+      dy: number;
+    };
+
+    const nodes: Node[] = [];
+
     for (let i = 0; i < 70; i++) {
       nodes.push({
         x: Math.random() * canvas.width,
@@ -59,6 +86,7 @@ export default function LoginPage() {
           const dx = node.x - nodes[j].x;
           const dy = node.y - nodes[j].y;
           const dist = Math.sqrt(dx * dx + dy * dy);
+
           if (dist < 120) {
             ctx.beginPath();
             ctx.moveTo(node.x, node.y);
@@ -75,17 +103,23 @@ export default function LoginPage() {
     draw();
   }, []);
 
-  // ================= Cooldown Timer =================
+  /* ================= COOLDOWN ================= */
+
   useEffect(() => {
     if (cooldown <= 0) return;
+
     const timer = setInterval(() => {
       setCooldown((prev) => prev - 1);
     }, 1000);
+
     return () => clearInterval(timer);
   }, [cooldown]);
 
-  // ================= LOGIN / SIGNUP =================
-  const handleSubmit = async (e: React.FormEvent) => {
+  /* ================= AUTH ================= */
+
+  const handleSubmit = async (
+    e: React.FormEvent<HTMLFormElement>
+  ): Promise<void> => {
     e.preventDefault();
     setLoading(true);
 
@@ -120,11 +154,10 @@ export default function LoginPage() {
         return;
       }
 
-      const { error } =
-        await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
       if (error) {
         toast.error(error.message);
@@ -139,8 +172,7 @@ export default function LoginPage() {
     }
   };
 
-  // ================= FORGOT PASSWORD =================
-  const handleForgotPassword = async () => {
+  const handleForgotPassword = async (): Promise<void> => {
     if (cooldown > 0) return;
 
     if (!email) {
@@ -148,10 +180,9 @@ export default function LoginPage() {
       return;
     }
 
-    const { error } =
-      await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: "http://localhost:3000/login",
-      });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
 
     if (error) {
       toast.error(error.message);
@@ -161,10 +192,11 @@ export default function LoginPage() {
     }
   };
 
+  /* ================= UI ================= */
+
   return (
     <div style={wrapperStyle}>
       <Toaster position="top-right" />
-
       <canvas ref={canvasRef} style={canvasStyle} />
 
       <motion.div
@@ -177,13 +209,15 @@ export default function LoginPage() {
           {isSignup ? "Create Account" : "Login"}
         </h2>
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <form onSubmit={handleSubmit} style={formStyle}>
           <InputField
             icon={<Mail size={18} />}
             type="email"
             placeholder="Email Address"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setEmail(e.target.value)
+            }
           />
 
           <PasswordField
@@ -224,7 +258,11 @@ export default function LoginPage() {
             disabled={loading}
             style={buttonStyle}
           >
-            {loading ? "Please wait..." : isSignup ? "Sign Up" : "Login"}
+            {loading
+              ? "Please wait..."
+              : isSignup
+              ? "Sign Up"
+              : "Login"}
           </motion.button>
         </form>
 
@@ -245,22 +283,10 @@ export default function LoginPage() {
 
 /* ================= COMPONENTS ================= */
 
-const InputField = ({ icon, ...props }: any) => (
+const InputField = ({ icon, ...props }: InputFieldProps) => (
   <div style={{ position: "relative" }}>
     <div style={iconStyle}>{icon}</div>
-
-    <input
-      {...props}
-      style={inputStyle}
-      onFocus={(e) =>
-        (e.currentTarget.style.boxShadow =
-          "0 0 0 2px #6366f1")
-      }
-      onBlur={(e) =>
-        (e.currentTarget.style.boxShadow =
-          "none")
-      }
-    />
+    <input {...props} style={inputStyle} />
   </div>
 );
 
@@ -270,7 +296,7 @@ const PasswordField = ({
   show,
   setShow,
   placeholder = "Password",
-}: any) => (
+}: PasswordFieldProps) => (
   <div style={{ position: "relative" }}>
     <div style={iconStyle}>
       <Lock size={18} />
@@ -280,16 +306,10 @@ const PasswordField = ({
       type={show ? "text" : "password"}
       placeholder={placeholder}
       value={value}
-      onChange={(e) => setValue(e.target.value)}
+      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+        setValue(e.target.value)
+      }
       style={passwordStyle}
-      onFocus={(e) =>
-        (e.currentTarget.style.boxShadow =
-          "0 0 0 2px #6366f1")
-      }
-      onBlur={(e) =>
-        (e.currentTarget.style.boxShadow =
-          "none")
-      }
     />
 
     <div onClick={() => setShow(!show)} style={eyeStyle}>
@@ -307,7 +327,6 @@ const wrapperStyle = {
   justifyContent: "center",
   alignItems: "center",
   padding: 20,
-  position: "relative" as const,
 };
 
 const canvasStyle = {
@@ -321,35 +340,35 @@ const cardStyle = {
   position: "relative" as const,
   zIndex: 1,
   background: "rgba(15,23,42,0.8)",
-  backdropFilter: "blur(20px)",
   borderRadius: 20,
   padding: 45,
   width: "100%",
   maxWidth: 500,
-  boxShadow: "0 20px 60px rgba(99,102,241,0.3)",
   color: "white",
 };
 
+const formStyle = {
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 22,
+};
+
 const inputStyle = {
-  width: "100%",
+  width: "88%",
   padding: "14px 14px 14px 45px",
   borderRadius: 12,
   border: "1px solid rgba(99,102,241,0.3)",
   background: "#0f172a",
   color: "white",
-  outline: "none",
-  boxSizing: "border-box" as const,
 };
 
 const passwordStyle = {
-  width: "100%",
+  width: "80%",
   padding: "14px 50px 14px 45px",
   borderRadius: 12,
   border: "1px solid rgba(99,102,241,0.3)",
   background: "#0f172a",
   color: "white",
-  outline: "none",
-  boxSizing: "border-box" as const,
 };
 
 const iconStyle = {
